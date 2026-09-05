@@ -1,0 +1,1472 @@
+<!--!
+  3D Eyes — generador de autoestereogramas
+
+  MIT License
+
+  Copyright (c) 2026 Sebastián Wilson Traub
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+-->
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3D Eyes</title>
+<style>
+  /* =========================================================================
+     3D Eyes — hoja de estilos
+
+     Criterio general: la interfaz es oscura y desaturada a propósito. Un
+     autoestereograma se fusiona con más facilidad cuando alrededor no hay
+     colores saturados ni contrastes fuertes compitiendo por la atención, así
+     que el único color vivo de la página es el acento, y vive en el panel
+     lateral, lejos del lienzo.
+     ========================================================================= */
+
+  :root {
+    --bg: #101317;            /* fondo del área del lienzo */
+    --panel: #171b21;         /* fondo del panel de controles */
+    --edge: #252b33;          /* separadores sutiles */
+    --edge-strong: #39414c;   /* bordes de controles */
+    --text: #dde1e6;
+    --dim: #8b93a0;           /* texto secundario y de ayuda */
+    --accent: #8aa7cf;        /* azul acero: frío, no deja post-imagen */
+    --accent-ink: #0d1117;    /* texto sobre el acento */
+    --bad: #cf8a8a;           /* mensajes de error */
+
+    /* Ancho del panel. El separador arrastrable la reescribe desde JS. */
+    --rail-width: 340px;
+
+    --font-display: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+    --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 15px;
+    line-height: 1.5;
+  }
+
+  /* Tres columnas: panel, separador arrastrable y escenario. La altura fija y
+     el overflow oculto hacen que solo se desplacen el panel y el lienzo, nunca
+     la página completa. */
+  body {
+    display: grid;
+    grid-template-columns: var(--rail-width) 5px 1fr;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ---------- panel de controles ---------- */
+
+  .rail {
+    background: var(--panel);
+    padding: 28px 24px 40px;
+    overflow-y: auto;
+    min-width: 0;
+  }
+
+  .rail h1 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 27px;
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    margin: 0 0 6px;
+  }
+
+  .rail .lede {
+    color: var(--dim);
+    font-size: 13.5px;
+    margin: 0 0 26px;
+    max-width: 34ch;
+  }
+
+  .group {
+    border-top: 1px solid var(--edge);
+    padding-top: 18px;
+    margin-top: 22px;
+  }
+
+  /* El primer grupo no lleva línea superior: ya está el encabezado arriba. */
+  .group.first { border-top: none; padding-top: 0; margin-top: 0; }
+
+  .group h2 { font-size: 14px; font-weight: 600; margin: 0 0 12px; }
+
+  .field { margin-bottom: 14px; }
+  .field:last-child { margin-bottom: 0; }
+  .field label { display: block; font-size: 13px; margin-bottom: 5px; }
+
+  .note { display: block; font-size: 12px; color: var(--dim); margin-top: 4px; }
+
+  /* Slider más su lectura numérica. El ancho mínimo del output evita que la
+     fila se reacomode cuando el número cambia de cantidad de dígitos. */
+  .row { display: flex; align-items: center; gap: 10px; }
+  .row input[type="range"] { flex: 1; min-width: 0; }
+  .row output {
+    min-width: 4.4em;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: var(--dim);
+    font-size: 13px;
+  }
+
+  .check { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 12px; }
+  .check input { margin-top: 3px; }
+  .check label { font-size: 13px; }
+
+  /* ---------- zonas de carga ---------- */
+
+  /* Cada zona es un <label> que envuelve un <input type="file"> oculto: así un
+     clic en cualquier parte abre el selector sin necesidad de JS. */
+  .drop {
+    display: block;
+    border: 1px dashed var(--edge-strong);
+    border-radius: 3px;
+    padding: 14px 12px;
+    text-align: center;
+    color: var(--dim);
+    font-size: 13px;
+    cursor: pointer;
+    background: #0c0f13;
+  }
+
+  .drop:hover, .drop:focus-visible { border-color: var(--accent); color: var(--text); }
+  .drop.over { border-color: var(--accent); background: #121820; color: var(--text); }
+  /* Borde continuo en vez de punteado una vez que ya hay imagen cargada. */
+  .drop.loaded { border-style: solid; color: var(--text); }
+  .drop strong { display: block; font-weight: 600; color: var(--text); }
+  .drop span { display: block; font-size: 12px; margin-top: 2px; }
+  .drop input[type="file"] { display: none; }
+
+  /* ---------- icono de ayuda ---------- */
+
+  /* El icono va dentro de .dropfield pero FUERA del <label>. Si estuviera
+     dentro, un clic sobre él abriría el selector de archivos, porque un clic
+     en cualquier punto de un label activa su control asociado. */
+  .dropfield { position: relative; }
+
+  .info {
+    position: absolute;
+    top: 7px;
+    right: 7px;
+    width: 16px;
+    height: 16px;
+    border: 1px solid var(--edge-strong);
+    border-radius: 50%;
+    background: var(--panel);
+    color: var(--dim);
+    font-family: var(--font-display);
+    font-style: italic;
+    font-size: 11px;
+    line-height: 14px;
+    text-align: center;
+    cursor: help;
+  }
+
+  .info:hover, .info:focus-visible { border-color: var(--accent); color: var(--accent); }
+
+  /* El globo se oculta con visibility y no con display para que siga siendo
+     accesible al foco de teclado, no solo al puntero. */
+  .tip {
+    position: absolute;
+    top: calc(100% + 7px);
+    right: -5px;
+    width: 218px;
+    padding: 8px 10px;
+    background: #0a0d11;
+    border: 1px solid var(--edge-strong);
+    border-radius: 3px;
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-style: normal;
+    font-size: 12px;
+    line-height: 1.4;
+    text-align: left;
+    z-index: 5;
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .info:hover .tip, .info:focus-visible .tip { visibility: visible; }
+
+  /* ---------- sliders y casillas ---------- */
+
+  /* Los controles nativos ignoran el tema oscuro en la mayoría de los sistemas,
+     así que se dibujan por completo. */
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    height: 16px;
+    margin: 0;
+    padding: 0;
+    cursor: pointer;
+  }
+
+  /* WebKit no ofrece un pseudo-elemento para el tramo ya recorrido, así que se
+     pinta con un degradado de dos tramos. La variable --fill la actualiza el JS
+     en updateRangeFill(). */
+  input[type="range"]::-webkit-slider-runnable-track {
+    height: 3px;
+    border-radius: 2px;
+    background: linear-gradient(to right,
+      var(--accent) 0 var(--fill, 50%), var(--edge-strong) var(--fill, 50%) 100%);
+  }
+
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 13px;
+    height: 13px;
+    margin-top: -5px;   /* centra el pulgar sobre un riel de 3px */
+    border-radius: 50%;
+    background: var(--accent);
+    border: none;
+  }
+
+  /* Firefox sí tiene ::-moz-range-progress, así que esta rama no necesita JS. */
+  input[type="range"]::-moz-range-track {
+    height: 3px;
+    border-radius: 2px;
+    background: var(--edge-strong);
+  }
+
+  input[type="range"]::-moz-range-progress {
+    height: 3px;
+    border-radius: 2px;
+    background: var(--accent);
+  }
+
+  input[type="range"]::-moz-range-thumb {
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: none;
+  }
+
+  input[type="range"]:hover::-webkit-slider-thumb { background: #a9c1de; }
+  input[type="range"]:hover::-moz-range-thumb { background: #a9c1de; }
+  input[type="range"]:focus { outline: none; }
+  input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(138, 167, 207, 0.35); }
+  input[type="range"]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 3px rgba(138, 167, 207, 0.35); }
+
+  input[type="checkbox"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 15px;
+    height: 15px;
+    flex: none;
+    border: 1px solid var(--edge-strong);
+    border-radius: 3px;
+    background: #0c0f13;
+    display: grid;
+    place-content: center;
+    cursor: pointer;
+  }
+
+  input[type="checkbox"]:hover { border-color: var(--accent); }
+  input[type="checkbox"]:checked { background: var(--accent); border-color: var(--accent); }
+
+  /* El visto es un cuadrado sin dos lados, girado 45 grados. */
+  input[type="checkbox"]:checked::after {
+    content: "";
+    width: 8px;
+    height: 4px;
+    border-left: 2px solid var(--accent-ink);
+    border-bottom: 2px solid var(--accent-ink);
+    transform: rotate(-45deg) translate(1px, -1px);
+  }
+
+  /* ---------- botones ---------- */
+
+  button {
+    font: inherit;
+    font-size: 13px;
+    border-radius: 3px;
+    border: 1px solid var(--edge-strong);
+    background: #0c0f13;
+    color: var(--text);
+    padding: 7px 12px;
+    cursor: pointer;
+  }
+
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: 0.42; cursor: not-allowed; }
+
+  .downloads { display: flex; gap: 8px; }
+  .downloads button { flex: 1; }
+
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ---------- barras de desplazamiento ---------- */
+
+  .rail, .canvas-wrap { scrollbar-width: thin; scrollbar-color: var(--edge-strong) transparent; }
+  .rail::-webkit-scrollbar, .canvas-wrap::-webkit-scrollbar { width: 11px; height: 11px; }
+  .rail::-webkit-scrollbar-track, .canvas-wrap::-webkit-scrollbar-track { background: transparent; }
+  /* El borde del mismo color del fondo simula un pulgar más delgado con un
+     área de arrastre cómoda. */
+  .rail::-webkit-scrollbar-thumb, .canvas-wrap::-webkit-scrollbar-thumb {
+    background: var(--edge-strong);
+    border-radius: 6px;
+    border: 3px solid var(--panel);
+  }
+  .canvas-wrap::-webkit-scrollbar-thumb { border-color: var(--bg); }
+  .rail::-webkit-scrollbar-thumb:hover,
+  .canvas-wrap::-webkit-scrollbar-thumb:hover { background: #4c5765; }
+
+  /* ---------- separador arrastrable ---------- */
+
+  /* Es un <button> para heredar foco y semántica de control. touch-action:none
+     evita que el navegador interprete el arrastre como desplazamiento. */
+  .splitter {
+    background: var(--edge);
+    cursor: col-resize;
+    border: none;
+    padding: 0;
+    border-radius: 0;
+    touch-action: none;
+  }
+
+  .splitter:hover, .splitter:focus-visible, .splitter.dragging { background: var(--accent); }
+
+  /* ---------- escenario y lienzo ---------- */
+
+  .stage { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+
+  /* overflow:auto más margin:auto en el lienzo lo centra cuando cabe y permite
+     desplazarlo sin recortarlo cuando el zoom lo hace más grande que el área. */
+  .canvas-wrap { flex: 1; overflow: auto; display: flex; min-height: 0; padding: 20px; }
+
+  canvas { margin: auto; display: none; background: #000; flex: none; }
+  canvas.ready { display: block; }
+  /* Solo al ampliar: ver el píxel exacto ayuda, pero al reducir el
+     nearest-neighbor muestrea el patrón de forma irregular y cuesta fusionarlo. */
+  canvas.crisp { image-rendering: pixelated; }
+
+  .empty { margin: auto; max-width: 44ch; color: var(--dim); text-align: center; }
+  .empty p { margin: 0 0 10px; }
+  .empty .big { font-family: var(--font-display); font-size: 20px; color: var(--text); }
+  .empty.hidden { display: none; }
+
+  /* ---------- barra inferior ---------- */
+
+  .toolbar {
+    border-top: 1px solid var(--edge);
+    padding: 8px 20px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    min-height: 46px;
+  }
+
+  .zoom { display: flex; align-items: center; gap: 6px; }
+  .zoom button { padding: 4px 9px; line-height: 1; font-size: 15px; }
+  .zoom .level {
+    min-width: 4.5em;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+    color: var(--dim);
+  }
+  /* visibility en vez de display para que la barra no cambie de alto al
+     aparecer el primer resultado. */
+  .zoom.off { visibility: hidden; }
+
+  .status { font-size: 13px; color: var(--dim); flex: 1; min-width: 12ch; }
+  .status.bad { color: var(--bad); }
+
+  /* ---------- pantallas angostas ---------- */
+
+  @media (max-width: 860px) {
+    body { grid-template-columns: 1fr; height: auto; overflow: visible; }
+    .rail { border-bottom: 1px solid var(--edge); }
+    .splitter { display: none; }   /* sin dos columnas no hay nada que separar */
+    .canvas-wrap { max-height: 70vh; }
+  }
+</style>
+</head>
+<body>
+
+<aside class="rail" id="rail">
+  <h1>3D Eyes</h1>
+  <p class="lede">Generador gratuito de autoestereogramas. Todo se procesa de manera privada en tu navegador.</p>
+
+  <div class="group first">
+    <h2>Imágenes</h2>
+
+    <div class="field dropfield">
+      <label class="drop" id="depthDrop" tabindex="0">
+        <strong>Cargar Imagen de profundidad</strong>
+        <span id="depthInfo">Blanco es cerca, negro es lejos</span>
+        <input type="file" id="depthInput" accept="image/*">
+      </label>
+      <span class="info" tabindex="0" role="note"
+            aria-label="Imagen en escala de grises que define el volumen 3D a visualizar">i<span
+            class="tip">Imagen en escala de grises que define el volumen 3D a visualizar</span></span>
+    </div>
+
+    <div class="field dropfield">
+      <label class="drop" id="textureDrop" tabindex="0">
+        <strong>Cargar Textura</strong>
+        <span id="textureInfo">Se repite para formar la superficie</span>
+        <input type="file" id="textureInput" accept="image/*">
+      </label>
+      <span class="info" tabindex="0" role="note"
+            aria-label="Patrón que se va a repetir y dentro del cual quedará escondida la figura">i<span
+            class="tip">Patrón que se va a repetir y dentro del cual quedará escondida la figura</span></span>
+    </div>
+  </div>
+
+  <div class="group">
+    <h2>Relieve</h2>
+
+    <div class="field">
+      <label for="eyeSep">Separación ocular</label>
+      <div class="row">
+        <input type="range" id="eyeSep" min="100" max="700" step="1" value="250">
+        <output id="eyeSepOut">250 px</output>
+      </div>
+      <span class="note">Distancia entre los puntos que fusiona la vista. Valores altos dan más relieve y más detalle de textura, pero exigen mirar la imagen más reducida.</span>
+      <span class="note" id="eyeSepNote"></span>
+    </div>
+
+    <div class="field">
+      <label for="mu">Profundidad de campo</label>
+      <div class="row">
+        <input type="range" id="mu" min="0.05" max="0.45" step="0.01" value="0.20">
+        <output id="muOut">0.33</output>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="smoothing">Suavizado del relieve</label>
+      <div class="row">
+        <input type="range" id="smoothing" min="0" max="5" step="1" value="0">
+        <output id="smoothingOut">0 px</output>
+      </div>
+      <span class="note">Ablanda los bordes duros de la imagen de profundidad.</span>
+    </div>
+
+    <div class="check">
+      <input type="checkbox" id="invert">
+      <div>
+        <label for="invert">Invertir profundidad</label>
+        <span class="note">Úsalo si tu imagen marca lo cercano en negro.</span>
+      </div>
+    </div>
+
+    <div class="check">
+      <input type="checkbox" id="autoStretch" checked>
+      <div>
+        <label for="autoStretch">Aprovechar todo el rango de grises</label>
+        <span class="note">Estira el contraste para maximizar el relieve. Apágalo si tu mapa ya usa un rango pensado.</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="group">
+    <h2>Mosaico</h2>
+
+    <div class="field">
+      <label for="tileHeight">Alto de la repetición vertical</label>
+      <div class="row">
+        <input type="range" id="tileHeight" min="1" max="512" step="1" value="94">
+        <output id="tileHeightOut">94 px</output>
+      </div>
+      <span class="note">Cada cuántos píxeles se repite la textura hacia abajo. Sigue la proporción de tu textura mientras no lo muevas. A lo ancho siempre ocupa una franja completa.</span>
+    </div>
+  </div>
+
+  <div class="group">
+    <div class="downloads">
+      <button type="button" id="savePng" disabled>Guardar PNG</button>
+      <button type="button" id="saveWebp" disabled>Guardar WEBP</button>
+    </div>
+  </div>
+</aside>
+
+<button type="button" class="splitter" id="splitter" aria-label="Ancho del panel de controles"
+        role="separator" aria-orientation="vertical"></button>
+
+<main class="stage">
+  <div class="canvas-wrap" id="canvasWrap">
+    <div class="empty" id="empty">
+      <p class="big">Carga dos imágenes para empezar</p>
+      <p>La primera define dónde está cada punto en el espacio. La segunda es el patrón que se va a repetir y dentro del cual quedará escondida la figura.</p>
+      <p>Para ver el resultado, mira la imagen y deja que tus ojos enfoquen más allá de la pantalla hasta que las repeticiones se junten.</p>
+    </div>
+    <canvas id="output"></canvas>
+  </div>
+
+  <div class="toolbar">
+    <div class="zoom off" id="zoomBar">
+      <button type="button" id="zoomOut" aria-label="Alejar">−</button>
+      <span class="level" id="zoomLevel">100 %</span>
+      <button type="button" id="zoomIn" aria-label="Acercar">+</button>
+      <button type="button" id="zoomFit">Ajustar</button>
+      <button type="button" id="zoomReset">1:1</button>
+    </div>
+    <div class="status" id="status"></div>
+  </div>
+</main>
+
+<script>
+/* ===========================================================================
+   3D Eyes — generador de autoestereogramas
+
+   Todo el código vive dentro de un closure para no tocar el ámbito global y
+   para que un minificador pueda renombrar cualquier identificador interno.
+
+   Recorrido general del programa:
+
+     1. El usuario carga dos imágenes. De la de profundidad se guarda su
+        luminancia ya calculada; de la textura se guarda el bitmap.
+     2. Cualquier cambio en los controles agenda una regeneración con un
+        pequeño retardo, para no recalcular en cada paso de un slider.
+     3. render() arma el mapa de profundidad, opcionalmente lo suaviza, escala
+        la textura al tamaño del mosaico y llama al núcleo.
+     4. El núcleo escribe directamente sobre el ImageData del lienzo.
+
+   Los identificadores están en inglés a propósito, para que el código sea
+   legible por cualquier programador. Todo el texto que ve el usuario y que
+   nace del JS está en STRINGS, que es el único lugar a tocar para traducir.
+   Las etiquetas fijas viven en el HTML.
+   =========================================================================== */
+
+/*! 3D Eyes — MIT License — Copyright (c) 2026 Sebastián Wilson Traub */
+(function () {
+  'use strict';
+
+  /** Atajo para document.getElementById. */
+  function $(id) { return document.getElementById(id); }
+
+  /** Atajo para addEventListener. */
+  function on(node, type, handler, options) {
+    node.addEventListener(type, handler, options);
+  }
+
+  // ==========================================================================
+  // Textos
+  // ==========================================================================
+
+  var STRINGS = {
+    depthLoaded: 'Profundidad: {width} × {height} px',
+    textureLoaded: 'Textura: {width} × {height} px',
+    invalidImage: 'No se pudo leer «{name}» como imagen. Prueba con PNG, JPEG o WEBP.',
+    working: 'Generando…',
+    done: 'Listo: {width} × {height} px en {ms} ms',
+    eyeSepCapped: 'Limitada a {max} px por el ancho de tu imagen.',
+    pixels: '{value} px',
+    zoomLevel: '{value} %',
+    exportUnsupported: 'Este navegador no puede exportar en {format}.',
+    saved: '{format} guardado: {name} ({width} × {height} px)'
+  };
+
+  /**
+   * Sustituye marcadores con nombre: t('Hola {quien}', { quien: 'mundo' }).
+   * Un marcador sin valor se deja tal cual, para que el error sea visible en
+   * pantalla en vez de convertirse en un "undefined" silencioso.
+   */
+  function t(template, params) {
+    if (!params) return template;
+    return template.replace(/\{(\w+)\}/g, function (match, key) {
+      return Object.prototype.hasOwnProperty.call(params, key) ? String(params[key]) : match;
+    });
+  }
+
+  // ==========================================================================
+  // Núcleo del autoestereograma
+  //
+  // La imagen se divide en franjas verticales del ancho de un período. La
+  // primera es la referencia y muestra el patrón sin deformar; cada franja
+  // siguiente repite la anterior desplazada, y la magnitud del desplazamiento
+  // en cada punto la dicta el mapa de profundidad. Al mirar más allá de la
+  // pantalla, el cerebro fusiona un punto con su repetición y deduce de esa
+  // distancia a qué profundidad está.
+  //
+  // Se recorre al revés de como suena: por cada píxel de salida se retrocede
+  // franja por franja hasta caer en la de referencia, y ahí se muestrea la
+  // textura. Todo el recorrido ocurre en punto flotante, así que el
+  // desplazamiento no se redondea nunca y la profundidad es continua de
+  // verdad. El muestreo final es bilineal, de modo que la textura se deforma
+  // suavemente en vez de copiarse píxel a píxel.
+  // ==========================================================================
+
+  /**
+   * Distancia entre un punto y su repetición, para una profundidad dada.
+   *
+   * En el fondo vale un período completo; en el punto más cercano se reduce en
+   * la fracción que indica la profundidad de campo. Existe como función porque
+   * es la relación que define todo el efecto, y las pruebas la contrastan
+   * contra lo que se mide en la imagen generada.
+   *
+   * @param {number} z            profundidad normalizada: 0 el fondo, 1 lo más cercano
+   * @param {number} stripe       ancho de franja en píxeles
+   * @param {number} depthFactor  cuánto se acorta el período en el punto más cercano
+   */
+  function separationAt(z, stripe, depthFactor) {
+    return stripe * (1 - depthFactor * z);
+  }
+
+  /** Profundidad en una coordenada horizontal fraccionaria, interpolada. */
+  function sampleDepth(depth, width, x, row) {
+    if (x <= 0) return depth[row];
+    if (x >= width - 1) return depth[row + width - 1];
+    var i = x | 0;
+    var f = x - i;
+    return depth[row + i] * (1 - f) + depth[row + i + 1] * f;
+  }
+
+  /**
+   * Genera el estereograma.
+   *
+   * @param {Float32Array} depth   mapa de profundidad, width*height, valores en [0,1]
+   * @param {number} stripe        ancho de franja en píxeles
+   * @param {number} depthFactor   entre 0 y 1; cuánto se acorta el período al frente
+   * @param {function} sample      (u, y) -> color, con u en [0,1) dentro de la franja
+   * @param {Uint32Array} pixels   destino; se escribe encima, no se asigna
+   */
+  function generateStereogram(depth, width, height, stripe, depthFactor, sample, pixels) {
+    // El paso más corto posible es stripe*(1-depthFactor), así que con esa
+    // cota se sabe cuántos retrocesos bastan para cruzar la imagen completa.
+    // El límite existe solo por seguridad: la condición del bucle es la que
+    // corta en el caso normal.
+    var maxSteps = Math.ceil(width / (stripe * (1 - depthFactor))) + 2;
+    // La consulta de profundidad va media franja hacia el lado del recorrido.
+    // Ese desfase es el que hace que cada punto se perciba justo donde está: la
+    // posición percibida de un par es su punto medio, y con media franja de
+    // corrimiento coincide con la columna consultada. Sin él, el relieve sale
+    // corrido y la franja del extremo del mapa no se muestrea nunca.
+    var depthOffset = stripe * 0.5;
+
+    // La franja de referencia va al centro de la imagen y no al borde.
+    //
+    // Cada franja es una copia desplazada de la anterior, así que la deformación
+    // se acumula al alejarse de la referencia: con la referencia pegada a un
+    // borde, la franja del otro extremo carga con la suma de todas y llega
+    // quebrada. Centrándola, el recorrido más largo se parte en dos.
+    var center = (width - 1) * 0.5;
+
+    var x, y, row, u, step, referenceWidth, referenceLeft, referenceRight, moved;
+
+    for (y = 0; y < height; y++) {
+      row = y * width;
+
+      // El ancho de la franja de referencia sigue a la profundidad de su propio
+      // centro, y por eso se recalcula en cada fila.
+      //
+      // Es lo que evita una costura vertical en sus bordes. Un píxel justo
+      // afuera aterriza a una separación de distancia, mientras que uno justo
+      // adentro no se mueve: si la franja midiera siempre un período completo,
+      // la diferencia entre ambos sería un salto abrupto del patrón, tanto
+      // mayor cuanto más cerca esté el relieve. Haciendo que la franja mida
+      // exactamente esa separación, los dos lados empalman sin salto.
+      referenceWidth = separationAt(sampleDepth(depth, width, center, row), stripe, depthFactor);
+      referenceLeft = center - referenceWidth * 0.5;
+      referenceRight = referenceLeft + referenceWidth;
+
+      for (x = 0; x < width; x++) {
+        u = x;
+        moved = 0;
+
+        // Se camina hacia la referencia por el lado que corresponda. Cada paso
+        // consulta la profundidad medio período por delante, en el sentido de
+        // la marcha.
+        for (step = 0; step < maxSteps; step++) {
+          if (u >= referenceRight) {
+            // Si el paso anterior fue hacia el otro lado, el punto ya está en
+            // el entorno de la referencia y seguir solo lo haría oscilar: pasa
+            // cuando la profundidad local difiere de la del centro de la fila.
+            if (moved > 0) break;
+            u -= separationAt(sampleDepth(depth, width, u - depthOffset, row), stripe, depthFactor);
+            moved = -1;
+          } else if (u < referenceLeft) {
+            if (moved < 0) break;
+            u += separationAt(sampleDepth(depth, width, u + depthOffset, row), stripe, depthFactor);
+            moved = 1;
+          } else {
+            break;
+          }
+        }
+
+        pixels[row + x] = sample((u - referenceLeft) / referenceWidth, y);
+      }
+    }
+  }
+
+  // ==========================================================================
+  // Mapa de profundidad
+  // ==========================================================================
+
+  // Coeficientes de luminancia de la Rec. 709. Para una imagen en escala de
+  // grises los tres canales son iguales y da lo mismo, pero así una imagen a
+  // color también produce un relieve razonable.
+  var LUMA_R = 0.2126, LUMA_G = 0.7152, LUMA_B = 0.0722;
+
+  /**
+   * Convierte píxeles RGBA a luminancia en [0,1] y de paso registra el rango
+   * observado, que es lo que necesita el estirado de contraste.
+   *
+   * Se llama una sola vez al cargar la imagen: es la parte cara y no depende
+   * de ningún control, así que recalcularla en cada movimiento de slider sería
+   * puro desperdicio.
+   */
+  function luminanceFromPixels(data) {
+    var count = data.length >> 2;
+    var luma = new Float32Array(count);
+    var min = Infinity, max = -Infinity;
+    var i, offset, value;
+
+    for (i = 0; i < count; i++) {
+      offset = i << 2;
+      value = (LUMA_R * data[offset] + LUMA_G * data[offset + 1] + LUMA_B * data[offset + 2]) / 255;
+      luma[i] = value;
+      if (value < min) min = value;
+      if (value > max) max = value;
+    }
+
+    return { luma: luma, min: min, max: max };
+  }
+
+  /**
+   * Aplica estirado de contraste e inversión sobre la luminancia ya calculada.
+   *
+   * El estirado lleva el gris más oscuro a 0 y el más claro a 1, de modo que el
+   * relieve use todo el rango disponible. Se puede apagar cuando el mapa ya
+   * viene con un rango intencional.
+   *
+   * @param {Float32Array} out  destino reutilizable
+   */
+  function applyDepthRange(luma, min, max, invert, autoStretch, out) {
+    var stretch = autoStretch && max > min;
+    var offset = stretch ? min : 0;
+    var scale = stretch ? 1 / (max - min) : 1;
+    var i, value;
+
+    for (i = 0; i < luma.length; i++) {
+      value = (luma[i] - offset) * scale;
+      out[i] = invert ? 1 - value : value;
+    }
+
+    return out;
+  }
+
+  /**
+   * Desenfoque de caja separable, en dos pasadas y con suma deslizante.
+   *
+   * En vez de sumar los 2r+1 vecinos de cada píxel, mantiene una suma corriente
+   * y en cada paso resta el vecino que sale de la ventana y suma el que entra.
+   * Eso lo vuelve independiente del radio. Los bordes se tratan repitiendo el
+   * píxel extremo, que es por lo que la suma inicial arranca con el primer
+   * valor contado r+1 veces.
+   *
+   * @param {Float32Array} pass  buffer intermedio reutilizable
+   * @param {Float32Array} out   destino reutilizable
+   */
+  function smoothDepth(depth, width, height, radius, pass, out) {
+    if (radius < 1) return depth;
+
+    var span = radius * 2 + 1;
+    var lastX = width - 1, lastY = height - 1;
+    var x, y, k, sum, row;
+
+    for (y = 0; y < height; y++) {
+      row = y * width;
+      sum = depth[row] * (radius + 1);
+      for (k = 1; k <= radius; k++) sum += depth[row + (k < lastX ? k : lastX)];
+      for (x = 0; x < width; x++) {
+        pass[row + x] = sum / span;
+        sum -= depth[row + (x - radius > 0 ? x - radius : 0)];
+        sum += depth[row + (x + radius + 1 < lastX ? x + radius + 1 : lastX)];
+      }
+    }
+
+    for (x = 0; x < width; x++) {
+      sum = pass[x] * (radius + 1);
+      for (k = 1; k <= radius; k++) sum += pass[(k < lastY ? k : lastY) * width + x];
+      for (y = 0; y < height; y++) {
+        out[y * width + x] = sum / span;
+        sum -= pass[(y - radius > 0 ? y - radius : 0) * width + x];
+        sum += pass[(y + radius + 1 < lastY ? y + radius + 1 : lastY) * width + x];
+      }
+    }
+
+    return out;
+  }
+
+  // ==========================================================================
+  // Mosaico
+  // ==========================================================================
+
+  /**
+   * Separación ocular máxima admisible para un ancho de imagen dado.
+   *
+   * El período del patrón es la mitad de la separación ocular. Se exige que
+   * quepan al menos tres franjas a lo ancho: con menos, la figura escondida
+   * casi no alcanza a formarse. El piso del slider manda si la imagen es
+   * diminuta.
+   */
+  function maxEyeSeparation(imageWidth, sliderMax, sliderMin) {
+    return Math.max(sliderMin, Math.min(sliderMax, Math.floor(imageWidth * 2 / 3)));
+  }
+
+  /** Ancho de franja: el período del patrón en el fondo. */
+  function stripeWidth(eyeSep) {
+    return eyeSep / 2;
+  }
+
+  /** Alto que conserva la proporción original de la textura, con tope. */
+  function tileHeightForWidth(width, naturalWidth, naturalHeight, maxHeight) {
+    var height = Math.round((width * naturalHeight) / naturalWidth);
+    return Math.max(1, Math.min(height, maxHeight));
+  }
+
+  /**
+   * Interpolación bilineal entre dos filas del mosaico ya localizadas.
+   *
+   * Recibe resueltas las dos filas vecinas y el peso vertical, porque eso solo
+   * depende de la fila de salida y se calcula una vez por fila en lugar de una
+   * vez por píxel. Aquí queda únicamente el trabajo que sí cambia con x.
+   *
+   * Los cuatro canales se interpolan por separado: mezclar los enteros
+   * empaquetados daría colores sin sentido, porque el acarreo de un canal se
+   * derramaría sobre el siguiente. El alfa se fija opaco.
+   *
+   * @param {number} rowA  índice del primer píxel de la fila superior
+   * @param {number} rowB  índice del primer píxel de la fila inferior
+   * @param {number} ty    peso vertical entre ambas, en [0,1)
+   * @param {number} u     posición horizontal normalizada; se repite fuera de [0,1)
+   */
+  function blendRows(tile, tileW, rowA, rowB, ty, u) {
+    var fx = u * tileW - 0.5;
+    var x0 = Math.floor(fx);
+    var tx = fx - x0, itx = 1 - tx, ity = 1 - ty;
+
+    // El doble módulo mantiene el índice dentro del mosaico incluso con u
+    // negativo, que es lo que devuelve el operador % de JavaScript.
+    var xa = ((x0 % tileW) + tileW) % tileW;
+    var xb = (xa + 1) % tileW;
+
+    var p00 = tile[rowA + xa], p10 = tile[rowA + xb];
+    var p01 = tile[rowB + xa], p11 = tile[rowB + xb];
+
+    var r = (((p00 & 255) * itx + (p10 & 255) * tx) * ity +
+             ((p01 & 255) * itx + (p11 & 255) * tx) * ty) | 0;
+    var g = ((((p00 >> 8) & 255) * itx + ((p10 >> 8) & 255) * tx) * ity +
+             (((p01 >> 8) & 255) * itx + ((p11 >> 8) & 255) * tx) * ty) | 0;
+    var b = ((((p00 >> 16) & 255) * itx + ((p10 >> 16) & 255) * tx) * ity +
+             (((p01 >> 16) & 255) * itx + ((p11 >> 16) & 255) * tx) * ty) | 0;
+
+    return (255 << 24) | (b << 16) | (g << 8) | r;
+  }
+
+  /**
+   * Construye la función que entrega el color del patrón.
+   *
+   * A lo ancho la textura ocupa exactamente una franja, así que u ya viene
+   * normalizado y se usa tal cual. A lo alto se repite cada period píxeles.
+   *
+   * Los términos verticales se recuerdan entre llamadas: el núcleo recorre la
+   * imagen fila por fila, así que y solo cambia cada width llamadas y todo lo
+   * que depende de él se resuelve una vez en vez de un millón.
+   *
+   * @param {Uint32Array} tile   textura ya remuestreada
+   * @param {number} period      cada cuántas filas se repite hacia abajo
+   */
+  function makeTileSampler(tile, tileW, tileH, period) {
+    var lastY = -1, rowA = 0, rowB = 0, ty = 0;
+
+    return function (u, y) {
+      if (y !== lastY) {
+        lastY = y;
+        var fy = ((y % period) / period) * tileH - 0.5;
+        var y0 = Math.floor(fy);
+        ty = fy - y0;
+        var ya = ((y0 % tileH) + tileH) % tileH;
+        rowA = ya * tileW;
+        rowB = ((ya + 1) % tileH) * tileW;
+      }
+      return blendRows(tile, tileW, rowA, rowB, ty, u);
+    };
+  }
+
+  // La textura se remuestrea al doble del tamaño con que se va a mostrar. A
+  // tamaño exacto, las zonas donde el patrón se comprime quedarían submuestreadas
+  // y aparecerían dientes; con el doble hay margen y el filtrado bilineal
+  // dispone de detalle suficiente.
+  var TEXTURE_OVERSAMPLE = 2;
+
+  // ==========================================================================
+  // Nombre de los archivos de salida
+  // ==========================================================================
+
+  /**
+   * Nombre de archivo sin su extensión.
+   *
+   * Un punto inicial no cuenta como separador, para que «.perfil» no quede
+   * vacío. Se recortan espacios y puntos finales porque Windows no acepta
+   * archivos que terminen así. Un nombre indistinguible como «mapa.de.prueba»
+   * sin extensión se interpreta como raíz «mapa.de»: esa ambigüedad es del
+   * formato de nombres y no tiene solución.
+   */
+  function baseName(filename) {
+    var dot = filename.lastIndexOf('.');
+    var base = dot > 0 ? filename.slice(0, dot) : filename;
+    base = base.replace(/[\s.]+$/, '').trim();
+    return base || 'imagen';
+  }
+
+  // ==========================================================================
+  // Zoom
+  // ==========================================================================
+
+  // Pasos discretos en vez de una escala continua: dan saltos predecibles con
+  // la rueda y evitan quedar en factores raros al ampliar.
+  var ZOOM_STEPS = [0.1, 0.15, 0.25, 0.33, 0.5, 0.67, 0.8, 1, 1.5, 2, 3, 4, 6, 8];
+
+  /** Paso siguiente o anterior de la escala; en los extremos se queda quieto. */
+  function nextZoom(current, direction) {
+    var i;
+    if (direction > 0) {
+      for (i = 0; i < ZOOM_STEPS.length; i++) {
+        if (ZOOM_STEPS[i] > current + 1e-6) return ZOOM_STEPS[i];
+      }
+      return ZOOM_STEPS[ZOOM_STEPS.length - 1];
+    }
+    for (i = ZOOM_STEPS.length - 1; i >= 0; i--) {
+      if (ZOOM_STEPS[i] < current - 1e-6) return ZOOM_STEPS[i];
+    }
+    return ZOOM_STEPS[0];
+  }
+
+  // ==========================================================================
+  // Estado
+  // ==========================================================================
+
+  var state = {
+    // Imagen de profundidad, ya reducida a luminancia
+    luma: null,
+    lumaMin: 0,
+    lumaMax: 1,
+    depthName: 'imagen',
+    depthWidth: 0,
+    depthHeight: 0,
+
+    // Textura
+    textureBitmap: null,
+    textureWidth: 0,
+    textureHeight: 0,
+
+    // La textura ocupa siempre una franja completa a lo ancho, así que su ancho
+    // efectivo lo fija la separación ocular. lastTileWidth guarda el de la
+    // pasada anterior: el alto solo se recalcula cuando ese ancho cambió, y por
+    // eso un alto puesto a mano sobrevive a cualquier otro ajuste del panel.
+    lastTileWidth: 0,
+
+    // Lienzo
+    zoom: 1,
+    fitting: true,   // true mientras el zoom siga automáticamente al contenedor
+    rendered: false
+  };
+
+  /**
+   * Buffers reutilizados entre renders. Con regeneración automática se dispara
+   * un render por cada ajuste, y reservar varios megabytes cada vez dejaría al
+   * recolector de basura trabajando de más.
+   */
+  var buffers = { depth: null, blurPass: null, blurOut: null };
+
+  function reuseFloat(key, length) {
+    var buffer = buffers[key];
+    if (!buffer || buffer.length !== length) {
+      buffer = new Float32Array(length);
+      buffers[key] = buffer;
+    }
+    return buffer;
+  }
+
+  // ==========================================================================
+  // Referencias al DOM
+  // ==========================================================================
+
+  var el = {
+    rail: $('rail'),
+    splitter: $('splitter'),
+    depthDrop: $('depthDrop'),
+    depthInput: $('depthInput'),
+    depthInfo: $('depthInfo'),
+    textureDrop: $('textureDrop'),
+    textureInput: $('textureInput'),
+    textureInfo: $('textureInfo'),
+    eyeSep: $('eyeSep'),
+    eyeSepOut: $('eyeSepOut'),
+    eyeSepNote: $('eyeSepNote'),
+    mu: $('mu'),
+    muOut: $('muOut'),
+    smoothing: $('smoothing'),
+    smoothingOut: $('smoothingOut'),
+    invert: $('invert'),
+    autoStretch: $('autoStretch'),
+    tileHeight: $('tileHeight'),
+    tileHeightOut: $('tileHeightOut'),
+    savePng: $('savePng'),
+    saveWebp: $('saveWebp'),
+    canvas: $('output'),
+    canvasWrap: $('canvasWrap'),
+    empty: $('empty'),
+    zoomBar: $('zoomBar'),
+    zoomIn: $('zoomIn'),
+    zoomOut: $('zoomOut'),
+    zoomFit: $('zoomFit'),
+    zoomReset: $('zoomReset'),
+    zoomLevel: $('zoomLevel'),
+    status: $('status')
+  };
+
+  // Se leen del HTML para que el rango viva en un solo lugar.
+  var EYE_SEP_MIN = parseInt(el.eyeSep.min, 10);
+  var EYE_SEP_MAX = parseInt(el.eyeSep.max, 10);
+
+  var ctx = el.canvas.getContext('2d', { willReadFrequently: true });
+
+  // Lienzo auxiliar, invisible, usado para decodificar las imágenes de entrada
+  // y para escalar la textura al tamaño del mosaico.
+  var scratch = document.createElement('canvas');
+  var scratchCtx = scratch.getContext('2d', { willReadFrequently: true });
+
+  // ImageData de salida y su vista de 32 bits. Se conservan mientras no cambie
+  // el tamaño, y el núcleo escribe directamente sobre esa vista: así el
+  // resultado llega al lienzo sin ninguna copia intermedia.
+  var output = { image: null, view: null };
+
+  function reuseImageData(width, height) {
+    if (!output.image || output.image.width !== width || output.image.height !== height) {
+      output.image = ctx.createImageData(width, height);
+      output.view = new Uint32Array(output.image.data.buffer);
+    }
+    return output;
+  }
+
+  function setStatus(message, tone) {
+    el.status.textContent = message || '';
+    el.status.className = tone ? 'status ' + tone : 'status';
+  }
+
+  /**
+   * Dibuja una imagen en el lienzo auxiliar y devuelve sus píxeles.
+   * El suavizado se activa solo al escalar la textura; para la imagen de
+   * profundidad se lee a tamaño natural y no hace falta.
+   */
+  function readImageData(source, width, height, smooth) {
+    scratch.width = width;
+    scratch.height = height;
+    scratchCtx.imageSmoothingEnabled = !!smooth;
+    if (smooth) scratchCtx.imageSmoothingQuality = 'high';
+    scratchCtx.clearRect(0, 0, width, height);
+    scratchCtx.drawImage(source, 0, 0, width, height);
+    return scratchCtx.getImageData(0, 0, width, height);
+  }
+
+  function currentEyeSep() { return parseInt(el.eyeSep.value, 10); }
+  function currentMu() { return parseFloat(el.mu.value); }
+  function isReady() { return !!(state.luma && state.textureBitmap); }
+
+  // ==========================================================================
+  // Carga de archivos
+  // ==========================================================================
+
+  function loadFile(file, kind) {
+    if (!file) return;
+
+    createImageBitmap(file).then(function (bitmap) {
+      if (kind === 'depth') {
+        var analysis = luminanceFromPixels(readImageData(bitmap, bitmap.width, bitmap.height, false).data);
+        state.luma = analysis.luma;
+        state.lumaMin = analysis.min;
+        state.lumaMax = analysis.max;
+        state.depthWidth = bitmap.width;
+        state.depthHeight = bitmap.height;
+        state.depthName = baseName(file.name);
+        state.fitting = true;
+        el.depthInfo.textContent = t(STRINGS.depthLoaded, { width: bitmap.width, height: bitmap.height });
+        el.depthDrop.classList.add('loaded');
+      } else {
+        state.textureBitmap = bitmap;
+        state.textureWidth = bitmap.width;
+        state.textureHeight = bitmap.height;
+        el.textureInfo.textContent = t(STRINGS.textureLoaded, { width: bitmap.width, height: bitmap.height });
+        el.textureDrop.classList.add('loaded');
+      }
+
+      // Cambiar cualquiera de las dos imágenes invalida el alto del mosaico:
+      // una textura nueva trae otra proporción y una profundidad nueva cambia
+      // el tope. Poner lastTileWidth en 0 obliga a recalcularlo.
+      state.lastTileWidth = 0;
+
+      refreshControls();
+      scheduleRender();
+    }).catch(function () {
+      setStatus(t(STRINGS.invalidImage, { name: file.name }), 'bad');
+    });
+  }
+
+  /** Conecta una zona de carga: clic, teclado y arrastrar y soltar. */
+  function bindDrop(dropEl, inputEl, kind) {
+    on(dropEl, 'click', function () { inputEl.click(); });
+
+    on(dropEl, 'keydown', function (event) {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        inputEl.click();
+      }
+    });
+
+    on(inputEl, 'change', function () { loadFile(inputEl.files[0], kind); });
+
+    on(dropEl, 'dragover', function (event) {
+      event.preventDefault();   // sin esto el navegador no permite soltar
+      dropEl.classList.add('over');
+    });
+
+    on(dropEl, 'dragleave', function () { dropEl.classList.remove('over'); });
+
+    on(dropEl, 'drop', function (event) {
+      event.preventDefault();
+      dropEl.classList.remove('over');
+      loadFile(event.dataTransfer.files[0], kind);
+    });
+  }
+
+  bindDrop(el.depthDrop, el.depthInput, 'depth');
+  bindDrop(el.textureDrop, el.textureInput, 'texture');
+
+  // ==========================================================================
+  // Controles
+  // ==========================================================================
+
+  /** Actualiza la variable que pinta el tramo recorrido del slider en WebKit. */
+  function updateRangeFill(input) {
+    var min = parseFloat(input.min);
+    var max = parseFloat(input.max);
+    var value = parseFloat(input.value);
+    var ratio = max > min ? (value - min) / (max - min) : 0;
+    input.style.setProperty('--fill', (ratio * 100).toFixed(2) + '%');
+  }
+
+  /**
+   * Sincroniza los controles entre sí y refresca sus lecturas.
+   *
+   * Dos comportamientos automáticos conviven acá. El ancho del mosaico sigue al
+   * máximo útil hasta que el usuario lo toca, y desde entonces solo se recorta
+   * si ese máximo baja. El alto sigue al ancho, nunca al revés: se recalcula
+   * únicamente cuando el ancho efectivo cambió, de modo que un alto puesto a
+   * mano sobrevive a cualquier ajuste que no sea del ancho.
+   */
+  function refreshControls() {
+    // Una separación mayor que la imagen no deja espacio para ningún par, así
+    // que el tope del slider se recorta al ancho de la imagen cargada.
+    if (state.depthWidth) {
+      var allowed = maxEyeSeparation(state.depthWidth, EYE_SEP_MAX, EYE_SEP_MIN);
+      el.eyeSep.max = String(allowed);
+      if (currentEyeSep() > allowed) el.eyeSep.value = String(allowed);
+      el.eyeSepNote.textContent = allowed < EYE_SEP_MAX
+        ? t(STRINGS.eyeSepCapped, { max: allowed }) : '';
+    }
+
+    el.eyeSepOut.textContent = t(STRINGS.pixels, { value: currentEyeSep() });
+    el.muOut.textContent = currentMu().toFixed(2);
+    el.smoothingOut.textContent = t(STRINGS.pixels, { value: el.smoothing.value });
+
+    // El alto del mosaico no puede pasar del alto de la imagen: el patrón se
+    // repite verticalmente dentro del resultado.
+    var maxHeight = state.depthHeight || 1024;
+    el.tileHeight.max = String(maxHeight);
+
+    // El ancho efectivo de la textura en pantalla es el de la franja; el alto
+    // sigue la proporción original mientras no se toque a mano.
+    var width = Math.max(1, Math.round(stripeWidth(currentEyeSep())));
+    if (width !== state.lastTileWidth) {
+      state.lastTileWidth = width;
+      if (state.textureBitmap) {
+        el.tileHeight.value = String(tileHeightForWidth(
+          width, state.textureWidth, state.textureHeight, maxHeight));
+      }
+    }
+    if (parseInt(el.tileHeight.value, 10) > maxHeight) el.tileHeight.value = String(maxHeight);
+    el.tileHeightOut.textContent = t(STRINGS.pixels, { value: el.tileHeight.value });
+
+    updateRangeFill(el.eyeSep);
+    updateRangeFill(el.mu);
+    updateRangeFill(el.smoothing);
+    updateRangeFill(el.tileHeight);
+  }
+
+  function onControlChange() {
+    refreshControls();
+    scheduleRender();
+  }
+
+  on(el.eyeSep, 'input', onControlChange);
+  on(el.mu, 'input', onControlChange);
+  on(el.smoothing, 'input', onControlChange);
+  on(el.invert, 'change', onControlChange);
+  on(el.autoStretch, 'change', onControlChange);
+  on(el.tileHeight, 'input', onControlChange);
+
+  // ==========================================================================
+  // Generación
+  // ==========================================================================
+
+  // Arrastrar un slider dispara decenas de eventos por segundo. El temporizador
+  // se reinicia con cada uno, así que solo se genera cuando el usuario se
+  // detiene, y la interfaz nunca se traba a mitad de un arrastre.
+  var RENDER_DELAY = 140;
+  var renderTimer = 0;
+
+  function scheduleRender() {
+    if (!isReady()) return;
+    window.clearTimeout(renderTimer);
+    setStatus(STRINGS.working);
+    renderTimer = window.setTimeout(render, RENDER_DELAY);
+  }
+
+  /**
+   * Remuestrea la textura al tamaño con que se va a muestrear.
+   *
+   * El canal alfa se fuerza a opaco: una textura con transparencia dejaría
+   * huecos en el resultado. El ImageData recién leído ya tiene su propio
+   * búfer, así que la vista se arma encima sin copiar.
+   */
+  function buildTile(width, height) {
+    var bytes = readImageData(state.textureBitmap, width, height, true).data;
+    for (var i = 3; i < bytes.length; i += 4) bytes[i] = 255;
+    return new Uint32Array(bytes.buffer, bytes.byteOffset, bytes.length >> 2);
+  }
+
+  function render() {
+    if (!isReady()) return;
+
+    var started = performance.now();
+    var width = state.depthWidth;
+    var height = state.depthHeight;
+    var count = width * height;
+    var stripe = stripeWidth(currentEyeSep());
+    var depthFactor = currentMu();
+
+    // Los valores del panel se vuelven a acotar acá: los sliders pueden traer
+    // un valor válido para el estado anterior de los controles.
+    var period = Math.max(1, Math.min(parseInt(el.tileHeight.value, 10) || 1, height));
+
+    var depth = applyDepthRange(
+      state.luma, state.lumaMin, state.lumaMax,
+      el.invert.checked, el.autoStretch.checked,
+      reuseFloat('depth', count)
+    );
+
+    var radius = parseInt(el.smoothing.value, 10);
+    if (radius > 0) {
+      depth = smoothDepth(depth, width, height, radius,
+        reuseFloat('blurPass', count), reuseFloat('blurOut', count));
+    }
+
+    el.canvas.width = width;
+    el.canvas.height = height;
+    var target = reuseImageData(width, height);
+
+    // La textura se remuestrea al doble de su tamaño en pantalla para que el
+    // filtrado bilineal tenga detalle de sobra donde el patrón se comprime.
+    var tileW = Math.max(2, Math.round(stripe * TEXTURE_OVERSAMPLE));
+    var tileH = Math.max(2, Math.round(period * TEXTURE_OVERSAMPLE));
+
+    generateStereogram(depth, width, height, stripe, depthFactor,
+      makeTileSampler(buildTile(tileW, tileH), tileW, tileH, period),
+      target.view);
+
+    ctx.putImageData(target.image, 0, 0);
+
+    el.canvas.classList.add('ready');
+    el.empty.classList.add('hidden');
+    el.zoomBar.classList.remove('off');
+    el.savePng.disabled = false;
+    el.saveWebp.disabled = false;
+    state.rendered = true;
+
+    if (state.fitting) fitZoom(); else applyZoom();
+
+    setStatus(t(STRINGS.done, {
+      width: width, height: height, ms: Math.round(performance.now() - started)
+    }));
+  }
+
+  // ==========================================================================
+  // Zoom del lienzo
+  // ==========================================================================
+
+  /** Lleva el zoom actual al tamaño en pantalla del lienzo. */
+  function applyZoom() {
+    if (!state.rendered) return;
+    el.canvas.style.width = Math.max(1, Math.round(el.canvas.width * state.zoom)) + 'px';
+    el.canvas.style.height = Math.max(1, Math.round(el.canvas.height * state.zoom)) + 'px';
+    el.canvas.classList.toggle('crisp', state.zoom >= 1);
+    el.zoomLevel.textContent = t(STRINGS.zoomLevel, { value: Math.round(state.zoom * 100) });
+  }
+
+  /** Escala continua que hace calzar la imagen completa, sin pasar de 1:1. */
+  function fitZoom() {
+    if (!state.rendered) return;
+
+    var styles = window.getComputedStyle(el.canvasWrap);
+    var availableWidth = el.canvasWrap.clientWidth -
+      parseFloat(styles.paddingLeft) - parseFloat(styles.paddingRight);
+    var availableHeight = el.canvasWrap.clientHeight -
+      parseFloat(styles.paddingTop) - parseFloat(styles.paddingBottom);
+    if (availableWidth <= 0 || availableHeight <= 0) return;
+
+    state.zoom = Math.min(1, availableWidth / el.canvas.width, availableHeight / el.canvas.height);
+    state.fitting = true;
+    applyZoom();
+  }
+
+  /** Zoom manual: sale del modo automático y respeta los topes de la escala. */
+  function setZoom(value) {
+    state.zoom = Math.min(ZOOM_STEPS[ZOOM_STEPS.length - 1], Math.max(ZOOM_STEPS[0], value));
+    state.fitting = false;
+    applyZoom();
+  }
+
+  on(el.zoomIn, 'click', function () { setZoom(nextZoom(state.zoom, 1)); });
+  on(el.zoomOut, 'click', function () { setZoom(nextZoom(state.zoom, -1)); });
+  on(el.zoomReset, 'click', function () { setZoom(1); });
+  on(el.zoomFit, 'click', fitZoom);
+
+  // passive:false porque hay que cancelar el desplazamiento de la página.
+  on(el.canvasWrap, 'wheel', function (event) {
+    if (!state.rendered) return;
+    event.preventDefault();
+    setZoom(nextZoom(state.zoom, event.deltaY < 0 ? 1 : -1));
+  }, { passive: false });
+
+  on(window, 'resize', function () {
+    if (state.fitting) fitZoom();
+  });
+
+  // ==========================================================================
+  // Separador arrastrable
+  // ==========================================================================
+
+  var RAIL_MIN = 260;
+  var RAIL_MAX_RATIO = 0.6;
+
+  function setRailWidth(px) {
+    var limit = Math.max(RAIL_MIN, window.innerWidth * RAIL_MAX_RATIO);
+    var width = Math.min(limit, Math.max(RAIL_MIN, px));
+    document.documentElement.style.setProperty('--rail-width', width + 'px');
+    // Cambiar el ancho del panel cambia el espacio del lienzo.
+    if (state.fitting) fitZoom();
+  }
+
+  // La captura del puntero mantiene los eventos llegando al separador aunque
+  // el cursor se salga de sus 5 píxeles de ancho durante el arrastre.
+  on(el.splitter, 'pointerdown', function (event) {
+    event.preventDefault();
+    el.splitter.setPointerCapture(event.pointerId);
+    el.splitter.classList.add('dragging');
+  });
+
+  on(el.splitter, 'pointermove', function (event) {
+    if (!el.splitter.classList.contains('dragging')) return;
+    setRailWidth(event.clientX);
+  });
+
+  function endDrag(event) {
+    if (!el.splitter.classList.contains('dragging')) return;
+    el.splitter.classList.remove('dragging');
+    if (el.splitter.hasPointerCapture(event.pointerId)) {
+      el.splitter.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  on(el.splitter, 'pointerup', endDrag);
+  on(el.splitter, 'pointercancel', endDrag);
+
+  on(el.splitter, 'keydown', function (event) {
+    var current = el.rail.getBoundingClientRect().width;
+    if (event.key === 'ArrowLeft') { event.preventDefault(); setRailWidth(current - 16); }
+    else if (event.key === 'ArrowRight') { event.preventDefault(); setRailWidth(current + 16); }
+  });
+
+  // ==========================================================================
+  // Exportación
+  // ==========================================================================
+
+  function downloadBlob(blob, filename) {
+    var url = URL.createObjectURL(blob);
+    var anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    // La URL se libera con retraso porque la descarga arranca de forma asíncrona.
+    window.setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
+  /** El archivo hereda el nombre de la imagen de profundidad. */
+  function outputFilename(extension) {
+    return state.depthName + '-estereograma.' + extension;
+  }
+
+  /**
+   * Exporta el lienzo. Si el navegador no soporta el formato pedido, toBlob
+   * devuelve PNG en silencio, así que se compara el tipo del blob antes de
+   * entregar un archivo con la extensión equivocada.
+   */
+  function save(mime, extension, label) {
+    el.canvas.toBlob(function (blob) {
+      if (!blob || blob.type !== mime) {
+        setStatus(t(STRINGS.exportUnsupported, { format: label }), 'bad');
+        return;
+      }
+      var filename = outputFilename(extension);
+      downloadBlob(blob, filename);
+      setStatus(t(STRINGS.saved, {
+        format: label, name: filename, width: el.canvas.width, height: el.canvas.height
+      }));
+    }, mime, 1);
+  }
+
+  on(el.savePng, 'click', function () { save('image/png', 'png', 'PNG'); });
+  on(el.saveWebp, 'click', function () { save('image/webp', 'webp', 'WEBP'); });
+
+  // Deja los controles consistentes antes de la primera interacción.
+  refreshControls();
+})();
+</script>
+</body>
+</html>
